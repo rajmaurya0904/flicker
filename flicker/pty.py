@@ -5,9 +5,9 @@ import pty
 import subprocess
 
 
-def spawn_pty(cmd: list[str]) -> str:
+def spawn_pty(cmd: list[str]) -> tuple[str, int]:
     """
-    Spawn a child process in a pseudo-terminal and return its output.
+    Spawn a child process in a pseudo-terminal and return its output and exit code.
 
     Parameters
     ----------
@@ -16,8 +16,8 @@ def spawn_pty(cmd: list[str]) -> str:
 
     Returns
     -------
-    str
-        The output captured from the child process's PTY.
+    tuple[str, int]
+        The output captured from the child process's PTY and the exit code.
     """
     # Create a pipe for the PTY
     master_fd, slave_fd = pty.openpty()
@@ -45,7 +45,7 @@ def spawn_pty(cmd: list[str]) -> str:
                 break
 
         # Wait for the process to terminate
-        proc.wait()
-        return output.decode(errors="replace")
+        exit_code = proc.wait()
+        return output.decode(errors="replace"), exit_code
     finally:
         os.close(master_fd)
