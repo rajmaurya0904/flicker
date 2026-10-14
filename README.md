@@ -24,7 +24,10 @@ pip install -e ".[dev]"
 
 ## Limitations
 
-<!-- Honest and short: what it does NOT do, known gaps. -->
+- Requires `ffmpeg` and `ffprobe` executables to be installed and available in your PATH.
+- Currently only works on Unix-like systems (Linux, macOS) due to reliance on PTY.
+- Captures at a fixed interval (default 0.1 seconds), which may miss very rapid changes.
+- Output video may have limited color fidelity depending on terminal emulator and ffmpeg settings.
 
 ## Development
 
