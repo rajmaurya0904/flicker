@@ -2,7 +2,7 @@
 
 **A zero-config CLI tool that records terminal sessions directly to highly optimized MP4 or WebM screencasts for documentation and bug reports, without requiring heavy screen recording software.**
 
-<!-- THE PROBLEM: 2-3 concrete lines on the annoying thing this removes. -->
+Recording a terminal tutorial often means firing up bulky screen recorders, wrestling with settings, and ending up with gigantic files. Flicker removes that overhead: it captures your terminal directly to a compact video, using only what's already on your system.
 
 ## Example
 
