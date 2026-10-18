@@ -1,87 +1,120 @@
-"""Terminal frame capture engine."""
+"""Run a command in a pseudo-terminal and record what it prints, with timestamps."""
+
+from __future__ import annotations
 
 import os
-import pty
+import shlex
+import subprocess
 import time
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
+from dataclasses import dataclass
+
+from .cast import Event, Recording
+from .keyboard import StdinForwarder
+from .pty import IS_WINDOWS, PtySession
 
 
-def capture_frames(cmd: list[str], interval: float = 0.1) -> tuple[list[tuple[float, str]], int]:
+@dataclass
+class CaptureResult:
+    """What a capture produced and how it ended."""
+
+    recording: Recording
+    exit_code: int | None
+    interrupted: bool = False
+    timed_out: bool = False
+    uses_tty: bool = True
+
+
+def format_command(cmd: Sequence[str]) -> str:
+    """Render ``cmd`` the way a user would type it."""
+    return subprocess.list2cmdline(list(cmd)) if IS_WINDOWS else shlex.join(cmd)
+
+
+def default_shell() -> list[str]:
+    """The user's interactive shell, used when no command is given."""
+    if IS_WINDOWS:
+        return [os.environ.get("COMSPEC", "cmd.exe")]
+    return [os.environ.get("SHELL", "/bin/sh")]
+
+
+def capture(
+    cmd: Sequence[str],
+    cols: int = 80,
+    rows: int = 24,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: str | os.PathLike[str] | None = None,
+    echo: Callable[[str], None] | None = None,
+    interactive: bool = False,
+    max_duration: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> CaptureResult:
+    """Run ``cmd`` to completion and return everything it printed, timestamped.
+
+    ``echo`` is called with each chunk as it arrives so the caller can mirror the session
+    to a real terminal. With ``interactive`` the caller's keyboard is forwarded to the
+    child. ``max_duration`` kills the command after that many seconds. Ctrl+C (in
+    non-interactive mode) stops the command but keeps what was captured so far.
     """
-    Spawn a child process in a pseudo-terminal and capture timestamped frames of terminal output.
+    events: list[Event] = []
+    interrupted = False
+    timed_out = False
 
-    Args:
-        cmd: Command and arguments to execute.
-        interval: Time interval between frame captures in seconds.
-
-    Returns:
-        A list of (timestamp, frame_buffer) tuples and the process exit code.
-        frame_buffer is the accumulated terminal output up to that timestamp.
-    """
-    pid, fd = pty.fork()
-    if pid == 0:
-        # Child process
-        os.execvp(cmd[0], cmd)
-    else:
-        # Parent process
-        os.set_blocking(fd, False)
-        frames: list[tuple[float, str]] = []
-        buffer_parts: list[str] = []
-        last_capture = time.time()
-        child_exited = False
-        child_status = 0
-        while True:
+    session = PtySession(cmd, cols=cols, rows=rows, env=env, cwd=cwd)
+    started = clock()
+    forwarder = StdinForwarder(session) if interactive else nullcontext()
+    try:
+        with forwarder:
             try:
-                data = os.read(fd, 1024).decode()
-                if not data:
-                    # EOF
-                    break
-                buffer_parts.append(data)
-            except BlockingIOError:
-                # No data available
-                pass
-            except OSError:
+                while True:
+                    chunk = session.read(0.05)
+                    if chunk is None:
+                        break
+                    if chunk:
+                        events.append(Event(clock() - started, "o", chunk))
+                        if echo is not None:
+                            echo(chunk)
+                    if max_duration is not None and clock() - started > max_duration:
+                        timed_out = True
+                        session.terminate()
+                        break
+            except KeyboardInterrupt:
+                interrupted = True
+                session.terminate()
+        # Pick up anything the child wrote just before it stopped.
+        while (chunk := session.read(0.05)) is not None:
+            if chunk:
+                events.append(Event(clock() - started, "o", chunk))
+                if echo is not None:
+                    echo(chunk)
+            elif session.poll() is not None:
                 break
+        exit_code = session.wait(5.0)
+        if exit_code is None:
+            session.terminate()
+            exit_code = session.wait(2.0)
+        uses_tty = session.uses_tty
+    finally:
+        session.close()
 
-            # Check if child has exited
-            try:
-                pid_wait, status = os.waitpid(pid, os.WNOHANG)
-                if pid_wait == pid:
-                    child_exited = True
-                    child_status = status
-                    break
-            except ChildProcessError:
-                break
+    recording = Recording(
+        cols=cols,
+        rows=rows,
+        events=events,
+        command=format_command(cmd),
+        timestamp=int(time.time()),
+        env={"TERM": session_term(env)},
+    )
+    return CaptureResult(
+        recording=recording,
+        exit_code=exit_code,
+        interrupted=interrupted,
+        timed_out=timed_out,
+        uses_tty=uses_tty,
+    )
 
-            # Capture frame if interval elapsed
-            now = time.time()
-            if now - last_capture >= interval:
-                frames.append((now, ''.join(buffer_parts)))
-                last_capture = now
 
-            # Yield CPU to avoid busy loop
-            time.sleep(0.001)
-
-        # If child hasn't exited yet, wait for it
-        if not child_exited:
-            try:
-                _, status = os.waitpid(pid, 0)
-                child_exited = True
-                child_status = status
-            except ChildProcessError:
-                pass
-
-        # Final frame if there's remaining data and no frame captured recently
-        now = time.time()
-        if buffer_parts and (now - last_capture >= interval or not frames):
-            frames.append((now, ''.join(buffer_parts)))
-
-        # Get exit code
-        if child_exited:
-            if os.WIFEXITED(child_status):
-                exit_code = os.WEXITSTATUS(child_status)
-            else:
-                exit_code = -1
-        else:
-            exit_code = -1
-
-        return frames, exit_code
+def session_term(env: Mapping[str, str] | None) -> str:
+    """The TERM value the child was started with."""
+    return (env or os.environ).get("TERM", "xterm-256color")
