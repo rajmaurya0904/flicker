@@ -37,6 +37,10 @@ except ImportError:
 _EOF = object()
 _CONPTY_GRACE = 0.3
 _NEWLINE = re.compile(r"\r?\n")
+# Sequences ConPTY writes on its own when it starts: a window-size report request, a device
+# attributes query, and two mode switches. They carry nothing the program printed, and the
+# query would make a real terminal send an answer back into the child's input.
+_CONPTY_NOISE = re.compile(r"\x1b\[(?:1t|c|\?1004[hl]|\?9001[hl])")
 
 
 class PtyError(RuntimeError):
@@ -163,6 +167,7 @@ class PtySession:
                 text = self._proc.read(65536)
             except (EOFError, OSError):
                 break
+            text = _CONPTY_NOISE.sub("", text)
             if text:
                 self._queue.put(text)
         self._queue.put(_EOF)
