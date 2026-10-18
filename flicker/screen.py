@@ -44,14 +44,25 @@ class Terminal:
             cols, rows = event.resize()
             self.resize(cols, rows)
 
-    def take_changes(self) -> bool:
-        """True if anything visible changed since the last call (text, style or cursor)."""
+    def take_dirty_rows(self) -> set[int]:
+        """Rows that need redrawing since the last call: edited rows plus cursor rows.
+
+        An empty set means nothing visible changed. The first call returns every row.
+        """
+        rows = set(self.screen.dirty)
         cursor = self.screen.cursor
         state = (cursor.x, cursor.y, cursor.hidden)
-        changed = bool(self.screen.dirty) or state != self._last_cursor
+        if state != self._last_cursor:
+            rows.add(cursor.y)
+            if self._last_cursor is not None:
+                rows.add(self._last_cursor[1])
         self.screen.dirty.clear()
         self._last_cursor = state
-        return changed
+        return {r for r in rows if 0 <= r < self.screen.lines}
+
+    def take_changes(self) -> bool:
+        """True if anything visible changed since the last call (text, style or cursor)."""
+        return bool(self.take_dirty_rows())
 
     def lines(self) -> list[str]:
         """Plain text of every row with trailing blanks removed."""
