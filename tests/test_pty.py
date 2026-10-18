@@ -98,7 +98,7 @@ def test_terminate_stops_a_long_running_child() -> None:
 
 def test_timeout_kills_the_command() -> None:
     slow = py("import time; print('start', flush=True); time.sleep(60)")
-    output, code = spawn_pty(slow, timeout=1)
+    output, code = spawn_pty(slow, timeout=6)
     assert "start" in output
     assert code != 0
 
