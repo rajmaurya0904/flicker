@@ -1,10 +1,8 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## 0.1.0
 
-## [0.1.0]
-### Added
-- Zero-config CLI tool for recording terminal sessions
-- Output to MP4 or WebM formats
-- Automatic detection and use of ffmpeg
-- Command-line interface with minimal options
+- Record a command in a pseudo-terminal and encode it to MP4, WebM (VP9 or VP8) or GIF through ffmpeg.
+- Save recordings as asciicast v2 and render asciicast v2 and v3 files.
+- Idle compression, playback speed, themes, fonts, padding, cursor and constant-quality options.
+- `flicker record`, `render`, `info` and `doctor` commands.
